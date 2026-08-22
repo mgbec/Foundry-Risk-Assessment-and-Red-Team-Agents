@@ -95,6 +95,18 @@ python red_team_scan.py
 Writes `results/model_red_team_scorecard.json`, keyed by risk category and
 attack strategy with an attack success rate per combination.
 
+**Don't have a real agent to scan yet?** `sample_target_agent.py` creates a
+small fictional customer-support agent (fake account lookup + a
+password-reset tool gated on identity verification) so you have something
+concrete to run the agentic scan against instead of the bare pass-through
+agent `orchestrator.py` creates by default:
+```bash
+python sample_target_agent.py
+```
+It prints the agent name to set as `AZURE_AI_AGENT_NAME` in `.env`, and runs
+one smoke-test message through it so you can see tool calling work. All
+data in it is synthetic -- swap it out once you're scanning your real app.
+
 **Run just the agentic scan** (needs `AZURE_AI_AGENT_NAME` set -- either run
 `orchestrator.py` once first so it creates the agent, or set the name of an
 agent you already created):
