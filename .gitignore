@@ -1,0 +1,19 @@
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+override.tf
+override.tf.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+agent/results/
+agent/data/baseline_query_response.jsonl
+
+# Env
+.env
