@@ -11,85 +11,17 @@ locals {
     [var.ci_service_principal_object_id],
     var.additional_scan_operator_object_ids
   ))
+
+  # The "project" isn't a Terraform resource -- azure-ai-projects creates/
+  # verifies it at runtime against the account (see NOTE at the bottom of
+  # this file). This name just has to match what orchestrator.py uses.
+  project_name = "proj-redteam"
 }
 
 resource "azurerm_resource_group" "this" {
   name     = local.rg_name
   location = var.location
   tags     = var.tags
-}
-
-# ---------------------------------------------------------------------------
-# AI Foundry account + project
-# ---------------------------------------------------------------------------
-
-resource "azurerm_ai_foundry" "account" {
-  name                = "aif-${var.project_prefix}-${local.suffix}"
-  resource_group_name = azurerm_resource_group.this.name
-  location            = azurerm_resource_group.this.location
-  sku_name            = "S0"
-
-  # Disabling local (key-based) auth forces DefaultAzureCredential /
-  # managed identity everywhere -- recommended for a safety-testing account.
-  local_authentication_enabled = false
-
-  identity {
-    type = "SystemAssigned"
-  }
-
-  tags = var.tags
-}
-
-resource "azurerm_ai_foundry_project" "redteam" {
-  name          = "proj-redteam"
-  ai_foundry_id = azurerm_ai_foundry.account.id
-  location      = azurerm_resource_group.this.location
-
-  identity {
-    type = "SystemAssigned"
-  }
-
-  tags = var.tags
-}
-
-# ---------------------------------------------------------------------------
-# Model deployments
-#   - target_model:      the model / app backend you are assessing
-#   - adversarial_model:  generates attack prompts for the Red Teaming Agent
-#     (kept as a separate deployment so attack-generation quota doesn't
-#     compete with the target model's quota during a scan)
-# ---------------------------------------------------------------------------
-
-resource "azurerm_cognitive_deployment" "target_model" {
-  name                 = "target-${var.target_model_name}"
-  cognitive_account_id = azurerm_ai_foundry.account.id
-
-  model {
-    format  = "OpenAI"
-    name    = var.target_model_name
-    version = var.target_model_version
-  }
-
-  sku {
-    name     = "Standard"
-    capacity = var.target_model_capacity
-  }
-}
-
-resource "azurerm_cognitive_deployment" "adversarial_model" {
-  name                 = "adversarial-${var.adversarial_model_name}"
-  cognitive_account_id = azurerm_ai_foundry.account.id
-
-  model {
-    format  = "OpenAI"
-    name    = var.adversarial_model_name
-    version = var.target_model_version
-  }
-
-  sku {
-    name     = "Standard"
-    capacity = var.target_model_capacity
-  }
 }
 
 # ---------------------------------------------------------------------------
@@ -129,15 +61,89 @@ resource "azurerm_key_vault" "this" {
 }
 
 # ---------------------------------------------------------------------------
+# AI Foundry account
+#
+# The "new" unified AI Foundry account is an azurerm_cognitive_account with
+# kind = "AIServices" -- azurerm_ai_foundry/azurerm_ai_foundry_project are a
+# different, ML-workspace-based "Hub" resource with its own required Key
+# Vault/Storage Account wiring; that's not what we want here.
+# ---------------------------------------------------------------------------
+
+resource "azurerm_cognitive_account" "account" {
+  name                = "aif-${var.project_prefix}-${local.suffix}"
+  resource_group_name = azurerm_resource_group.this.name
+  location            = azurerm_resource_group.this.location
+  kind                = "AIServices"
+  sku_name            = "S0"
+
+  custom_subdomain_name = "aif-${var.project_prefix}-${local.suffix}"
+
+  # Enables named "Foundry projects" under this account (created at runtime
+  # by orchestrator.py via the SDK -- see NOTE at the bottom of this file).
+  project_management_enabled = true
+
+  # Disabling local (key-based) auth forces DefaultAzureCredential /
+  # managed identity everywhere -- recommended for a safety-testing account.
+  local_auth_enabled = false
+
+  identity {
+    type = "SystemAssigned"
+  }
+
+  tags = var.tags
+}
+
+# ---------------------------------------------------------------------------
+# Model deployments
+#   - target_model:      the model / app backend you are assessing
+#   - adversarial_model:  generates attack prompts for the Red Teaming Agent
+#     (kept as a separate deployment so attack-generation quota doesn't
+#     compete with the target model's quota during a scan)
+# ---------------------------------------------------------------------------
+
+resource "azurerm_cognitive_deployment" "target_model" {
+  name                 = "target-${var.target_model_name}"
+  cognitive_account_id = azurerm_cognitive_account.account.id
+
+  model {
+    format  = "OpenAI"
+    name    = var.target_model_name
+    version = var.target_model_version
+  }
+
+  sku {
+    name     = "Standard"
+    capacity = var.target_model_capacity
+  }
+}
+
+resource "azurerm_cognitive_deployment" "adversarial_model" {
+  name                 = "adversarial-${var.adversarial_model_name}"
+  cognitive_account_id = azurerm_cognitive_account.account.id
+
+  model {
+    format  = "OpenAI"
+    name    = var.adversarial_model_name
+    version = var.target_model_version
+  }
+
+  sku {
+    name     = "Standard"
+    capacity = var.target_model_capacity
+  }
+}
+
+# ---------------------------------------------------------------------------
 # RBAC
 #   "Foundry User" (formerly "Azure AI User") is the minimum role needed to
-#   run evaluations / red team scans and read the project.
+#   run evaluations / red team scans and read the project. Scoped to the
+#   account since the project itself isn't a Terraform-managed resource.
 # ---------------------------------------------------------------------------
 
 resource "azurerm_role_assignment" "foundry_user" {
   for_each             = toset(local.scan_operator_ids)
-  scope                = azurerm_ai_foundry_project.redteam.id
-  role_definition_name = "Azure AI User" # display name mid-rename to "Foundry User"
+  scope                = azurerm_cognitive_account.account.id
+  role_definition_name = "Foundry User" # renamed from "Azure AI User" in May 2026
   principal_id         = each.value
 }
 

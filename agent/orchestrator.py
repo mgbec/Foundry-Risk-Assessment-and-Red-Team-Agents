@@ -29,6 +29,7 @@ from config import load_settings
 from risk_assessment import run_risk_assessment
 from red_team_scan import run_model_red_team
 from red_team_agentic import run_agentic_red_team
+from targets import build_target_from_settings
 
 RESULTS_DIR = Path(__file__).parent / "results"
 
@@ -57,21 +58,6 @@ def ensure_target_agent(settings) -> str:
     return agent_name
 
 
-def call_target_for_risk_assessment(settings):
-    from azure.ai.projects import AIProjectClient
-
-    client = AIProjectClient(endpoint=settings.project_endpoint, credential=DefaultAzureCredential())
-
-    def _call(prompt: str) -> str:
-        response = client.inference.get_chat_completions_client().complete(
-            model=settings.target_deployment,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return response.choices[0].message.content
-
-    return _call
-
-
 def upload_reports(settings) -> None:
     blob_service = BlobServiceClient(
         account_url=f"https://{settings.results_storage_account}.blob.core.windows.net",
@@ -91,21 +77,32 @@ async def main():
     settings = load_settings()
     RESULTS_DIR.mkdir(exist_ok=True)
 
-    agent_name = ensure_target_agent(settings)
-    # settings.agent_name may have been unset; downstream stages read it
-    # from env, so make sure it's exported for this process if you didn't
-    # set AZURE_AI_AGENT_NAME already.
-    import os
-    os.environ.setdefault("AZURE_AI_AGENT_NAME", agent_name)
+    target = build_target_from_settings(settings)
+
+    # The agent-under-test and the agentic (stage 3) scan are both
+    # Foundry-Agent-specific -- only meaningful when we're actually testing
+    # an Azure deployment. An http target skips straight to stages 1-2
+    # against whatever external endpoint TARGET_HTTP_URL points at.
+    if settings.target_kind == "azure_deployment":
+        agent_name = ensure_target_agent(settings)
+        # settings.agent_name may have been unset; downstream stages read it
+        # from env, so make sure it's exported for this process if you
+        # didn't set AZURE_AI_AGENT_NAME already.
+        import os
+        os.environ.setdefault("AZURE_AI_AGENT_NAME", agent_name)
 
     print("[Orchestrator] Stage 1/3: risk assessment")
-    run_risk_assessment(call_target_for_risk_assessment(settings))
+    run_risk_assessment(target)
 
     print("[Orchestrator] Stage 2/3: model-level red team scan")
-    await run_model_red_team()
+    await run_model_red_team(target)
 
-    print("[Orchestrator] Stage 3/3: agentic red team scan")
-    run_agentic_red_team()
+    if settings.target_kind == "azure_deployment":
+        print("[Orchestrator] Stage 3/3: agentic red team scan")
+        run_agentic_red_team()
+    else:
+        print("[Orchestrator] Skipping stage 3/3 (agentic scan): requires a "
+              "Foundry-registered agent, not available for an http target.")
 
     print("[Orchestrator] Uploading reports to Blob Storage")
     upload_reports(settings)

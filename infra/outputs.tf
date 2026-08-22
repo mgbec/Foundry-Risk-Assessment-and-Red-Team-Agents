@@ -3,12 +3,12 @@ output "resource_group_name" {
 }
 
 output "ai_foundry_account_name" {
-  value = azurerm_ai_foundry.account.name
+  value = azurerm_cognitive_account.account.name
 }
 
 output "ai_foundry_project_endpoint" {
   description = "Set this as AZURE_AI_PROJECT_ENDPOINT for the Python agent."
-  value       = "https://${azurerm_ai_foundry.account.name}.services.ai.azure.com/api/projects/${azurerm_ai_foundry_project.redteam.name}"
+  value       = "https://${azurerm_cognitive_account.account.name}.services.ai.azure.com/api/projects/${local.project_name}"
 }
 
 output "target_model_deployment_name" {

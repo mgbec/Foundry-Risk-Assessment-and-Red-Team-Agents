@@ -4,6 +4,7 @@
 *.tfstate.*
 *.tfvars
 !*.tfvars.example
+federated-credential.json
 crash.log
 override.tf
 override.tf.json

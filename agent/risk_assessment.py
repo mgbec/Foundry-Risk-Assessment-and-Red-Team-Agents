@@ -80,18 +80,16 @@ def run_risk_assessment(call_target: Callable[[str], str]) -> dict:
 
 
 if __name__ == "__main__":
-    # Example target: swap this out for your real app/model call.
-    from azure.ai.projects import AIProjectClient
+    import argparse
+
+    from targets import add_target_cli_args, target_from_args
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    add_target_cli_args(parser)
+    args = parser.parse_args()
 
     settings = load_settings()
-    client = AIProjectClient(endpoint=settings.project_endpoint, credential=DefaultAzureCredential())
-
-    def call_target(prompt: str) -> str:
-        response = client.inference.get_chat_completions_client().complete(
-            model=settings.target_deployment,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return response.choices[0].message.content
+    call_target = target_from_args(args, settings)
 
     scorecard = run_risk_assessment(call_target)
     print(json.dumps(scorecard, indent=2)[:2000])

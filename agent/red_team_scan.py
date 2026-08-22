@@ -22,9 +22,9 @@ from pathlib import Path
 
 from azure.identity import DefaultAzureCredential
 from azure.ai.evaluation.red_team import RedTeam, RiskCategory, AttackStrategy
-from azure.ai.projects import AIProjectClient
 
 from config import load_settings
+from targets import Target, build_target_from_settings
 
 RESULTS_DIR = Path(__file__).parent / "results"
 
@@ -47,17 +47,13 @@ ATTACK_STRATEGIES = [
 ]
 
 
-async def run_model_red_team() -> dict:
+async def run_model_red_team(target: Target | None = None) -> dict:
+    """`target` defaults to whatever Settings/TARGET_KIND is configured for
+    (see targets.py) -- pass one explicitly to scan something else without
+    touching env vars, e.g. from a CLI override or another script."""
     settings = load_settings()
     credential = DefaultAzureCredential()
-    client = AIProjectClient(endpoint=settings.project_endpoint, credential=credential)
-
-    def target_fn(query: str) -> str:
-        response = client.inference.get_chat_completions_client().complete(
-            model=settings.target_deployment,
-            messages=[{"role": "user", "content": query}],
-        )
-        return response.choices[0].message.content
+    target = target or build_target_from_settings(settings)
 
     red_team_agent = RedTeam(
         azure_ai_project=settings.project_endpoint,
@@ -68,7 +64,7 @@ async def run_model_red_team() -> dict:
 
     RESULTS_DIR.mkdir(exist_ok=True)
     scan_result = await red_team_agent.scan(
-        target=target_fn,
+        target=target,
         attack_strategies=ATTACK_STRATEGIES,
         output_path=str(RESULTS_DIR / "model_red_team_scorecard.json"),
     )
@@ -77,5 +73,16 @@ async def run_model_red_team() -> dict:
 
 
 if __name__ == "__main__":
-    result = asyncio.run(run_model_red_team())
+    import argparse
+
+    from targets import add_target_cli_args, target_from_args
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    add_target_cli_args(parser)
+    args = parser.parse_args()
+
+    settings = load_settings()
+    target = target_from_args(args, settings)
+
+    result = asyncio.run(run_model_red_team(target))
     print(json.dumps(getattr(result, "scorecard", result), indent=2, default=str)[:2000])
