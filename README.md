@@ -176,6 +176,15 @@ export APPLICATIONINSIGHTS_CONNECTION_STRING=$(terraform -chdir=infra output -ra
 ```
 Leave it unset and nothing changes -- `trace_run()` becomes a no-op.
 
+Authentication matches the rest of this project: no API keys.
+`local_authentication_enabled = false` on the Application Insights resource
+means the connection string's embedded key alone can't authenticate --
+`agent/observability.py` passes `credential=DefaultAzureCredential()` to
+`configure_azure_monitor()`, so ingestion is AAD-token-based like everything
+else here. Terraform grants the `Monitoring Metrics Publisher` role (which,
+despite the name, covers all telemetry types) to the same scan operators
+who already have `Foundry User`/storage/Key Vault access.
+
 **Viewing traces**: they land in Application Insights directly (Transaction
 search, Application Map, or Log Analytics KQL) regardless of anything else.
 If you also want them in the Foundry portal's own **Agents → Traces** tab,

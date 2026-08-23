@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 from contextlib import contextmanager
 
+from azure.identity import DefaultAzureCredential
 from opentelemetry import trace
 
 _tracer = None
@@ -40,9 +41,16 @@ def enable_tracing() -> None:
 
     from azure.monitor.opentelemetry import configure_azure_monitor
 
-    configure_azure_monitor(connection_string=connection_string)
+    # AAD-authenticated ingestion, matching local_auth_enabled=false on the
+    # Foundry account and shared_access_key_enabled=false on storage --
+    # local_authentication_enabled=false on the Application Insights
+    # resource means the connection string's key alone won't be accepted.
+    configure_azure_monitor(
+        connection_string=connection_string,
+        credential=DefaultAzureCredential(),
+    )
     _tracer = trace.get_tracer(__name__)
-    print("[Observability] Tracing enabled -> Application Insights.")
+    print("[Observability] Tracing enabled -> Application Insights (AAD auth).")
 
 
 @contextmanager

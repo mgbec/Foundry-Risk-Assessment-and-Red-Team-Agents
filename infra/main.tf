@@ -91,6 +91,12 @@ resource "azurerm_application_insights" "observability" {
   workspace_id        = azurerm_log_analytics_workspace.observability.id
   application_type    = "web"
 
+  # Matches local_auth_enabled=false on the Foundry account and
+  # shared_access_key_enabled=false on storage: no connection-string-only
+  # ingestion, telemetry must carry an AAD token (agent/observability.py
+  # passes DefaultAzureCredential() to configure_azure_monitor for this).
+  local_authentication_enabled = false
+
   tags = var.tags
 }
 
@@ -192,6 +198,17 @@ resource "azurerm_role_assignment" "kv_secrets" {
   for_each             = toset(local.scan_operator_ids)
   scope                = azurerm_key_vault.this.id
   role_definition_name = "Key Vault Secrets User"
+  principal_id         = each.value
+}
+
+resource "azurerm_role_assignment" "monitoring_publisher" {
+  # Despite the name, this role covers publishing all telemetry types
+  # (traces/logs, not just metrics) -- required since local_authentication_
+  # enabled=false on the Application Insights resource above means AAD is
+  # the only way in.
+  for_each             = toset(local.scan_operator_ids)
+  scope                = azurerm_application_insights.observability.id
+  role_definition_name = "Monitoring Metrics Publisher"
   principal_id         = each.value
 }
 
