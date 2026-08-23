@@ -34,6 +34,7 @@ from azure.ai.agents import AgentsClient
 from azure.ai.agents.models import FunctionTool, ListSortOrder, ToolSet
 
 from config import load_settings
+from observability import trace_run
 
 DEFAULT_AGENT_NAME = "sample-target-agent"
 
@@ -146,10 +147,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     settings = load_settings()
-    name = ensure_sample_agent(settings, args.name)
+    with trace_run("sample-target-agent-run"):
+        name = ensure_sample_agent(settings, args.name)
 
-    if not args.no_smoke_test:
-        smoke_test(settings, name)
+        if not args.no_smoke_test:
+            smoke_test(settings, name)
 
     print(
         f"\nSet AZURE_AI_AGENT_NAME={name} in your .env (or export it) so "

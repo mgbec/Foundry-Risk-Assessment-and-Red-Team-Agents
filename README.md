@@ -160,6 +160,45 @@ az storage blob list --account-name <RESULTS_STORAGE_ACCOUNT> --container-name s
 az storage blob download --account-name <RESULTS_STORAGE_ACCOUNT> --container-name scorecards --name "<timestamp>/risk_assessment_results.json" --file ./risk_assessment_results.json --auth-mode login
 ```
 
+## Observability
+
+Every script (`orchestrator.py`, `risk_assessment.py`, `red_team_scan.py`,
+`sample_target_agent.py`) can send OpenTelemetry traces of its Azure SDK
+calls -- agent/thread/run calls, chat completions -- to Azure Monitor
+Application Insights, via `agent/observability.py`. This turns "the scan
+flagged something" into "here's the exact call sequence that produced it,"
+instead of only having the final scorecard.
+
+It's entirely opt-in. Terraform now provisions an Application Insights
+instance (plus the Log Analytics workspace it needs); wire it in with:
+```bash
+export APPLICATIONINSIGHTS_CONNECTION_STRING=$(terraform -chdir=infra output -raw app_insights_connection_string)
+```
+Leave it unset and nothing changes -- `trace_run()` becomes a no-op.
+
+**Viewing traces**: they land in Application Insights directly (Transaction
+search, Application Map, or Log Analytics KQL) regardless of anything else.
+If you also want them in the Foundry portal's own **Agents → Traces** tab,
+that requires a one-time manual **Connect** step in the portal -- azurerm
+doesn't yet support wiring a project's Application Insights connection via
+Terraform (same kind of gap as the project resource itself, see the NOTE at
+the bottom of `infra/main.tf`).
+
+**Privacy**: prompt/tool-argument/response content is *not* captured by
+default -- only call structure, timing, and status. This pipeline's traces
+routinely include red-team attack prompts and the synthetic account data
+from `sample_target_agent.py`, so think about Application Insights
+retention/access control before setting
+`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true`.
+
+Worth knowing: this only covers the *tracing* pillar of Foundry's
+observability story (see [Observability in Generative
+AI](https://learn.microsoft.com/en-us/azure/foundry/concepts/observability)).
+Continuous/scheduled evaluation against live production traffic and
+Azure Monitor alerting are a separate, bigger step -- not something this
+repo does, since it's testing on a schedule against a fixed baseline, not
+watching a live agent in production.
+
 ## What each stage actually checks
 
 - **Risk assessment** (`risk_assessment.py`): runs a benign baseline prompt

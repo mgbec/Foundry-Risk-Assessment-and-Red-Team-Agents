@@ -26,6 +26,7 @@ from azure.ai.agents import AgentsClient
 from azure.storage.blob import BlobServiceClient
 
 from config import load_settings
+from observability import trace_run
 from risk_assessment import run_risk_assessment
 from red_team_scan import run_model_red_team
 from red_team_agentic import run_agentic_red_team
@@ -77,37 +78,39 @@ async def main():
     settings = load_settings()
     RESULTS_DIR.mkdir(exist_ok=True)
 
-    target = build_target_from_settings(settings)
+    with trace_run("ai-safety-scan"):
+        target = build_target_from_settings(settings)
 
-    # The agent-under-test and the agentic (stage 3) scan are both
-    # Foundry-Agent-specific -- only meaningful when we're actually testing
-    # an Azure deployment. An http target skips straight to stages 1-2
-    # against whatever external endpoint TARGET_HTTP_URL points at.
-    if settings.target_kind == "azure_deployment":
-        agent_name = ensure_target_agent(settings)
-        # settings.agent_name may have been unset; downstream stages read it
-        # from env, so make sure it's exported for this process if you
-        # didn't set AZURE_AI_AGENT_NAME already.
-        import os
-        os.environ.setdefault("AZURE_AI_AGENT_NAME", agent_name)
+        # The agent-under-test and the agentic (stage 3) scan are both
+        # Foundry-Agent-specific -- only meaningful when we're actually
+        # testing an Azure deployment. An http target skips straight to
+        # stages 1-2 against whatever external endpoint TARGET_HTTP_URL
+        # points at.
+        if settings.target_kind == "azure_deployment":
+            agent_name = ensure_target_agent(settings)
+            # settings.agent_name may have been unset; downstream stages
+            # read it from env, so make sure it's exported for this process
+            # if you didn't set AZURE_AI_AGENT_NAME already.
+            import os
+            os.environ.setdefault("AZURE_AI_AGENT_NAME", agent_name)
 
-    print("[Orchestrator] Stage 1/3: risk assessment")
-    run_risk_assessment(target)
+        print("[Orchestrator] Stage 1/3: risk assessment")
+        run_risk_assessment(target)
 
-    print("[Orchestrator] Stage 2/3: model-level red team scan")
-    await run_model_red_team(target)
+        print("[Orchestrator] Stage 2/3: model-level red team scan")
+        await run_model_red_team(target)
 
-    if settings.target_kind == "azure_deployment":
-        print("[Orchestrator] Stage 3/3: agentic red team scan")
-        run_agentic_red_team()
-    else:
-        print("[Orchestrator] Skipping stage 3/3 (agentic scan): requires a "
-              "Foundry-registered agent, not available for an http target.")
+        if settings.target_kind == "azure_deployment":
+            print("[Orchestrator] Stage 3/3: agentic red team scan")
+            run_agentic_red_team()
+        else:
+            print("[Orchestrator] Skipping stage 3/3 (agentic scan): requires a "
+                  "Foundry-registered agent, not available for an http target.")
 
-    print("[Orchestrator] Uploading reports to Blob Storage")
-    upload_reports(settings)
+        print("[Orchestrator] Uploading reports to Blob Storage")
+        upload_reports(settings)
 
-    print("[Orchestrator] Done.")
+        print("[Orchestrator] Done.")
 
 
 if __name__ == "__main__":

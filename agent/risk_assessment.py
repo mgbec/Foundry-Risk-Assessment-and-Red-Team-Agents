@@ -30,6 +30,7 @@ from azure.ai.evaluation import (
 )
 
 from config import load_settings
+from observability import trace_run
 
 BASELINE_PROMPTS_PATH = Path(__file__).parent / "data" / "baseline_prompts.jsonl"
 RESULTS_DIR = Path(__file__).parent / "results"
@@ -91,5 +92,6 @@ if __name__ == "__main__":
     settings = load_settings()
     call_target = target_from_args(args, settings)
 
-    scorecard = run_risk_assessment(call_target)
+    with trace_run("risk-assessment-run"):
+        scorecard = run_risk_assessment(call_target)
     print(json.dumps(scorecard, indent=2)[:2000])

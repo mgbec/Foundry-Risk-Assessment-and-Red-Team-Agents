@@ -61,6 +61,40 @@ resource "azurerm_key_vault" "this" {
 }
 
 # ---------------------------------------------------------------------------
+# Observability: Application Insights, for client-side OpenTelemetry tracing
+# from the Python scripts (see agent/observability.py). Entirely optional at
+# runtime -- if APPLICATIONINSIGHTS_CONNECTION_STRING isn't set, tracing
+# just doesn't happen.
+#
+# Wiring this up as the Foundry *project's* connected Application Insights
+# (for the portal's own Traces tab) isn't supported by azurerm yet -- that's
+# a one-time manual step in the Foundry portal if you want it (Agents ->
+# Traces -> Connect). Traces still land in Application Insights via
+# OpenTelemetry either way; the portal connection is just a convenience
+# viewer on top.
+# ---------------------------------------------------------------------------
+
+resource "azurerm_log_analytics_workspace" "observability" {
+  name                = "log-${var.project_prefix}-${local.suffix}"
+  resource_group_name = azurerm_resource_group.this.name
+  location            = azurerm_resource_group.this.location
+  sku                 = "PerGB2018"
+  retention_in_days   = 30
+
+  tags = var.tags
+}
+
+resource "azurerm_application_insights" "observability" {
+  name                = "appi-${var.project_prefix}-${local.suffix}"
+  resource_group_name = azurerm_resource_group.this.name
+  location            = azurerm_resource_group.this.location
+  workspace_id        = azurerm_log_analytics_workspace.observability.id
+  application_type    = "web"
+
+  tags = var.tags
+}
+
+# ---------------------------------------------------------------------------
 # AI Foundry account
 #
 # The "new" unified AI Foundry account is an azurerm_cognitive_account with

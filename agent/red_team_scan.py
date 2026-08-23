@@ -24,6 +24,7 @@ from azure.identity import DefaultAzureCredential
 from azure.ai.evaluation.red_team import RedTeam, RiskCategory, AttackStrategy
 
 from config import load_settings
+from observability import trace_run
 from targets import Target, build_target_from_settings
 
 RESULTS_DIR = Path(__file__).parent / "results"
@@ -84,5 +85,9 @@ if __name__ == "__main__":
     settings = load_settings()
     target = target_from_args(args, settings)
 
-    result = asyncio.run(run_model_red_team(target))
+    async def _run():
+        with trace_run("model-red-team-run"):
+            return await run_model_red_team(target)
+
+    result = asyncio.run(_run())
     print(json.dumps(getattr(result, "scorecard", result), indent=2, default=str)[:2000])

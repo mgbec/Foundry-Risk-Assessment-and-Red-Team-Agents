@@ -30,3 +30,9 @@ output "results_container_url" {
 output "key_vault_name" {
   value = azurerm_key_vault.this.name
 }
+
+output "app_insights_connection_string" {
+  description = "Set this as APPLICATIONINSIGHTS_CONNECTION_STRING to enable tracing (see agent/observability.py)."
+  value       = azurerm_application_insights.observability.connection_string
+  sensitive   = true
+}
