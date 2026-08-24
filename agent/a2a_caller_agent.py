@@ -97,10 +97,19 @@ def ensure_a2a_connection(settings, target_agent_name: str) -> None:
 
 def ensure_caller_agent(settings, project: AIProjectClient):
     a2a_connection = project.connections.get(CONNECTION_NAME)
-    # The default anonymous agent-card fetch 404s against our target --
-    # its incoming-A2A endpoint requires Entra auth on every A2A URL,
-    # card included (see a2a_target_agent.py / the README's A2A section).
-    tool = A2APreviewTool(project_connection_id=a2a_connection.id, send_credentials_for_agent_card=True)
+    # Docs say "don't set an agent card path, Foundry resolves it
+    # automatically" for a Foundry-to-Foundry target -- that auto-detection
+    # appears not to actually work (still 404s with send_credentials_for_
+    # agent_card alone), likely defaulting to the A2A-spec standard
+    # .well-known/agent-card.json instead of Foundry's nonstandard
+    # agentCard/v1.0 path. a2a_client_example.py already proved
+    # agentCard/v1.0 is the right path for this same endpoint, so set it
+    # explicitly rather than trust the auto-detection.
+    tool = A2APreviewTool(
+        project_connection_id=a2a_connection.id,
+        send_credentials_for_agent_card=True,
+        agent_card_path="agentCard/v1.0",
+    )
 
     agent = project.agents.create_version(
         agent_name=CALLER_AGENT_NAME,
