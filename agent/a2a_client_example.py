@@ -56,7 +56,11 @@ async def call_agent(project_endpoint: str, agent_name: str, message: str) -> No
             agent_card_path="agentCard/v1.0",
         )
         agent_card = await resolver.get_agent_card()
-        print(f"[A2AClient] Resolved agent card: {agent_card.name!r}, protocol {agent_card.protocol_version}")
+        # Attribute name for the protocol version varies across a2a-sdk
+        # versions (protocol_version / protocolVersion) -- don't let a
+        # cosmetic mismatch here block the actual test below.
+        version = getattr(agent_card, "protocol_version", getattr(agent_card, "protocolVersion", "unknown"))
+        print(f"[A2AClient] Resolved agent card: {agent_card.name!r}, protocol {version}")
 
         client = await create_client(
             agent=agent_card,
