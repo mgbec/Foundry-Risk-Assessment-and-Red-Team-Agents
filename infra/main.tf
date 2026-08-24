@@ -235,6 +235,16 @@ resource "azurerm_role_assignment" "foundry_agent_consumer" {
   principal_id         = each.value
 }
 
+resource "azurerm_role_assignment" "account_identity_agent_consumer" {
+  # Draft/unpublished agents share the account's own system identity
+  # (per Microsoft's A2A auth docs) rather than a per-agent one. Needed so
+  # a2a_caller_agent.py's caller agent -- itself an unpublished draft --
+  # can call a2a_target_agent.py's agent via AgenticIdentityToken auth.
+  scope                = azurerm_cognitive_account.account.id
+  role_definition_name = "Foundry Agent Consumer"
+  principal_id         = azurerm_cognitive_account.account.identity[0].principal_id
+}
+
 resource "azurerm_role_assignment" "monitoring_publisher" {
   # Despite the name, this role covers publishing all telemetry types
   # (traces/logs, not just metrics) -- required since local_authentication_

@@ -260,11 +260,30 @@ separate `client.get_task()` for fetching a completed task's result after
 the fact, which may be the intended pattern for this async-style protocol
 -- untried here since the request shape didn't match what a quick search
 turned up (that example was for an older API generation than the
-protobuf-based one Foundry's v1.0 endpoint speaks). Worth either digging
-into `get_task()` yourself or filing this with Microsoft: "task reports
-complete, response has no retrievable content" is a reasonable preview-bug
-report. This whole feature is in public preview -- verify before depending
-on it in production.
+protobuf-based one Foundry's v1.0 endpoint speaks).
+
+**Isolating whether this is Foundry's bug or the third-party SDK's**:
+`a2a_caller_agent.py` calls the same target agent using Foundry's own
+first-party A2A tool (`A2APreviewTool`) instead of `a2a-sdk` -- one Foundry
+agent calling another, Microsoft's documented recommended pattern for
+agent-to-agent delegation (a "toolbox" is an optional reuse/governance
+layer on top of the same connection+tool, not required to test this once):
+
+```bash
+python a2a_caller_agent.py
+```
+
+This creates an A2A project connection (`AgenticIdentityToken` auth --
+still no stored secret) pointed at the target agent, a second agent with
+the A2A tool attached, and sends it the same balance question with
+`tool_choice="required"`. If this gets a real answer where
+`a2a_client_example.py` didn't, the gap is in how the third-party SDK
+parses Foundry's response, not Foundry's incoming-A2A endpoint itself. If
+it also comes back empty, that's stronger evidence of a genuine
+server-side preview limitation -- at which point, file it with Microsoft.
+
+Either way: `get_task()` unexplored, `a2a_caller_agent.py` outcome
+unrecorded as of this writing -- run both and see which story holds up.
 
 ## What each stage actually checks
 
