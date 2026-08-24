@@ -239,29 +239,32 @@ without the broader `Foundry User` build/configure permissions). Anyone
 else who should be allowed to call this agent over A2A needs that same
 role assigned to their identity.
 
-**Open question, flagged rather than papered over**: the two tools
-(`lookup_customer_account`, `reset_customer_password`) are plain Python
-functions executed by whichever process drives the `responses.create` loop
-— that's clearly *us* when we call the agent directly, but it's unclear
-from Microsoft's current docs whether a genuinely external A2A caller also
-becomes responsible for executing them (which wouldn't make sense — they
-have no access to the fake account data), or whether Foundry handles that
-server-side for A2A-originated turns. `a2a_client_example.py` is a
-diagnostic built specifically to answer this: it calls the agent the way a
-real external caller would, over the actual A2A protocol via the
-open-source `a2a-sdk`, instead of our own direct SDK calls.
+**Confirmed limitation (tested 2026-08-24, `a2a-sdk` against Foundry's
+preview incoming-A2A endpoint)**: `a2a_client_example.py` calls the agent
+the way a genuine external caller would -- over the real A2A protocol, not
+our own direct SDK calls -- specifically to test whether a tool call
+(`lookup_customer_account`) resolves when the request arrives via A2A
+instead of being driven by our own process.
 
 ```bash
 pip install a2a-sdk azure-identity httpx   # not in requirements.txt -- one-off diagnostic
 python a2a_client_example.py
 ```
 
-If the reply correctly reports ACC-1001's balance, tool execution works
-over A2A. If it stalls or replies without the looked-up data, that
-client-executed function-tool pattern doesn't carry over to A2A callers as
-implemented, and tools would need to be backed by something Foundry can
-invoke itself rather than a local Python function. This whole feature is
-in public preview — verify before depending on it in production.
+Result: the task comes back `TASK_STATE_COMPLETED`, but the response
+carries no content whatsoever -- no `artifacts`, no `history`, no
+`status.message` (verified against the complete protobuf dump, not a
+partial read). Whatever happened to the tool call internally, nothing
+comes back through `send_message` as implemented here. `a2a-sdk` exposes a
+separate `client.get_task()` for fetching a completed task's result after
+the fact, which may be the intended pattern for this async-style protocol
+-- untried here since the request shape didn't match what a quick search
+turned up (that example was for an older API generation than the
+protobuf-based one Foundry's v1.0 endpoint speaks). Worth either digging
+into `get_task()` yourself or filing this with Microsoft: "task reports
+complete, response has no retrievable content" is a reasonable preview-bug
+report. This whole feature is in public preview -- verify before depending
+on it in production.
 
 ## What each stage actually checks
 

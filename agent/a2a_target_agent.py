@@ -18,17 +18,18 @@ sample_target_agent.py -- only the agent-creation and tool-schema plumbing
 differs, because Prompt agents take an explicit JSON schema per tool
 instead of introspecting a Python function's docstring.
 
-CAVEAT -- read before relying on this: the smoke test in this file drives
-the function-call loop itself (see run_conversation below), matching the
-documented Prompt-agent function-calling pattern where "your app executes
-the function and returns the output." What ISN'T verified here or in
-Microsoft's current A2A docs: whether an external caller reaching this
-agent purely over the A2A protocol also becomes responsible for executing
-lookup_customer_account/reset_customer_password locally (which makes no
-sense for a stranger with no access to _FAKE_ACCOUNTS), or whether Foundry
-executes function tools server-side for A2A-originated turns. Test this
-directly with a real external caller before depending on tool behavior
-over A2A -- this whole feature is in public preview.
+CONFIRMED LIMITATION (tested 2026-08-24 against Foundry's preview
+incoming-A2A endpoint via a2a_client_example.py): a real external A2A
+caller gets back TASK_STATE_COMPLETED with no content whatsoever -- no
+artifacts, no history, no status message -- regardless of what
+lookup_customer_account/reset_customer_password did internally. The
+run_conversation() smoke test below works fine because IT drives the
+function-call loop itself (the documented Prompt-agent pattern: "your app
+executes the function and returns the output"), which only proves the
+agent works when driven directly, not over A2A. See the README's "A2A
+(agent-to-agent) access" section for the full finding and next steps
+(client.get_task() may be the intended way to fetch a completed task's
+result -- untried here). This whole feature is in public preview.
 
 Usage:
     python a2a_target_agent.py                # create/verify, enable A2A, smoke test
