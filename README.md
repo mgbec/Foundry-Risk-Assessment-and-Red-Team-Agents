@@ -276,14 +276,33 @@ python a2a_caller_agent.py
 This creates an A2A project connection (`AgenticIdentityToken` auth --
 still no stored secret) pointed at the target agent, a second agent with
 the A2A tool attached, and sends it the same balance question with
-`tool_choice="required"`. If this gets a real answer where
-`a2a_client_example.py` didn't, the gap is in how the third-party SDK
-parses Foundry's response, not Foundry's incoming-A2A endpoint itself. If
-it also comes back empty, that's stronger evidence of a genuine
-server-side preview limitation -- at which point, file it with Microsoft.
+`tool_choice="required"`.
 
-Either way: `get_task()` unexplored, `a2a_caller_agent.py` outcome
-unrecorded as of this writing -- run both and see which story holds up.
+**Result (tested 2026-08-24): both of Microsoft's own documented paths for
+this exact Foundry-to-Foundry scenario fail, in different ways.**
+- The docs say don't set `agent_card_path` for a Foundry target -- Foundry
+  resolves it automatically. In practice, that automatic resolution 404s
+  (it appears to fall back to the A2A-spec default
+  `.well-known/agent-card.json` rather than Foundry's actual nonstandard
+  `agentCard/v1.0` path).
+- The documented escape hatch -- set `agent_card_path` yourself -- gets
+  rejected outright: `"Agent card path is invalid for a Foundry agent.
+  Either fix the agent card path or remove it to use the default agent
+  card path."` -- even using `agentCard/v1.0`, the exact path
+  `a2a_client_example.py` independently proved correct against this same
+  endpoint.
+
+So both the automatic and manual paths that Microsoft's own docs describe
+for a Foundry agent calling another Foundry agent over A2A are broken as
+of this testing, on top of the third-party `a2a-sdk` client's task
+completing with no retrievable content. Three independent invocation
+paths, three different failures, against Microsoft's own first-party
+tooling and their own documented escape hatches. This reads as a genuine,
+current preview-service gap rather than something to keep working around
+here -- worth filing with Microsoft directly (the error messages
+themselves link their troubleshooting guide, which doesn't cover this
+combination). `client.get_task()` in `a2a-sdk` remains the one unexplored
+avenue if you want to keep digging independently.
 
 ## What each stage actually checks
 

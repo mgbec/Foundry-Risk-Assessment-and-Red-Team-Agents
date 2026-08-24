@@ -7,10 +7,21 @@ a2a_client_example.py -- to isolate whether the empty-content finding
 documented there is a Foundry incoming-A2A bug, or specific to how the
 external a2a-sdk client parses Foundry's response.
 
-If THIS script gets a real answer back where a2a_client_example.py didn't,
-the gap is in a2a-sdk's handling, not Foundry's incoming-A2A endpoint. If
-this also comes back empty, that's stronger evidence of a genuine
-server-side preview limitation.
+CONFIRMED (tested 2026-08-24): both of Microsoft's own documented paths
+for a Foundry agent calling another Foundry agent over A2A are broken.
+Leaving agent_card_path unset (the documented default -- "Foundry resolves
+it automatically") 404s on the card fetch. Setting it explicitly to
+"agentCard/v1.0" (the exact path a2a_client_example.py independently
+proved correct against this same endpoint -- the documented escape hatch)
+gets rejected outright: "Agent card path is invalid for a Foundry agent.
+Either fix the agent card path or remove it to use the default agent card
+path." Both options the error message itself offers fail. Combined with
+a2a_client_example.py's task-completes-with-no-content finding, that's
+three independently-tested invocation paths, three different failures,
+against Microsoft's own first-party tooling. See the README's "A2A
+(agent-to-agent) access" section -- this looks like a genuine current
+preview-service gap worth filing with Microsoft directly, not something to
+keep working around here.
 
 This is Microsoft's documented "recommended" pattern for one Foundry agent
 calling another: an A2A project connection + the A2APreviewTool, attached
