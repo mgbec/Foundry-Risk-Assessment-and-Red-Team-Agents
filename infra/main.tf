@@ -12,9 +12,11 @@ locals {
     var.additional_scan_operator_object_ids
   ))
 
-  # The "project" isn't a Terraform resource -- azure-ai-projects creates/
-  # verifies it at runtime against the account (see NOTE at the bottom of
-  # this file). This name just has to match what orchestrator.py uses.
+  # This name just has to match what orchestrator.py / the agent scripts use
+  # in AZURE_AI_PROJECT_ENDPOINT (see outputs.tf). The project itself is a
+  # real resource below (azapi_resource.project) -- azurerm doesn't support
+  # it yet, but it does have to exist; agent creation fails with
+  # "ResourceNotFound: The project does not exist" otherwise.
   project_name = "proj-redteam"
 }
 
@@ -118,8 +120,8 @@ resource "azurerm_cognitive_account" "account" {
 
   custom_subdomain_name = "aif-${var.project_prefix}-${local.suffix}"
 
-  # Enables named "Foundry projects" under this account (created at runtime
-  # by orchestrator.py via the SDK -- see NOTE at the bottom of this file).
+  # Enables named "Foundry projects" under this account -- required before
+  # azapi_resource.project below can be created.
   project_management_enabled = true
 
   # Disabling local (key-based) auth forces DefaultAzureCredential /
@@ -131,6 +133,28 @@ resource "azurerm_cognitive_account" "account" {
   }
 
   tags = var.tags
+}
+
+# The Foundry *project* itself -- azurerm has no resource for this yet
+# (tracked upstream; project connections/management aren't supported on
+# azurerm_cognitive_account either), so this uses the azapi provider
+# already declared in providers.tf as the documented fallback. Without
+# this, every agent script fails with "ResourceNotFound: The project does
+# not exist" -- the project doesn't get created implicitly just because
+# something references its endpoint URL.
+resource "azapi_resource" "project" {
+  type      = "Microsoft.CognitiveServices/accounts/projects@2025-04-01-preview"
+  name      = local.project_name
+  parent_id = azurerm_cognitive_account.account.id
+  location  = azurerm_resource_group.this.location
+
+  identity {
+    type = "SystemAssigned"
+  }
+
+  body = {
+    properties = {}
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -222,10 +246,9 @@ resource "azurerm_role_assignment" "monitoring_publisher" {
   principal_id         = each.value
 }
 
-# NOTE on agents: attaching a Foundry Agent (the orchestrator / the agentic
-# system under test) to a specific PROJECT is not yet reliably supported via
-# Terraform/ARM -- deployments and agent registration currently need to go
-# through the Foundry/Agents SDK against the project endpoint. Terraform's
-# job here stops at "give the agent code a project + model deployments +
-# storage + RBAC to run against"; agent/orchestrator.py creates the actual
-# agent resource at runtime using azure-ai-projects.
+# NOTE on agents: Terraform creates the project itself (azapi_resource.project
+# above) and gives it model deployments + storage + RBAC to run against, but
+# creating/registering the AGENT resource inside that project isn't reliably
+# supported via Terraform/ARM yet -- that still goes through the Foundry/
+# Agents SDK. agent/orchestrator.py, sample_target_agent.py, and
+# a2a_target_agent.py all create their agent at runtime for this reason.
