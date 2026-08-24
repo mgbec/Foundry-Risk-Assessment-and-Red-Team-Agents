@@ -14,10 +14,15 @@ infra/                       Terraform: RG, AI Foundry account + project,
                               model deployments, storage, Key Vault, RBAC
 agent/
   config.py                  Env-driven settings shared by all scripts
+  targets.py                 Pluggable scan target: Azure deployment or any HTTP API
+  observability.py           Optional OpenTelemetry tracing to Application Insights
   risk_assessment.py         Non-adversarial safety evaluators (fast gate)
   red_team_scan.py           PyRIT red team scan of the raw model (local)
   red_team_agentic.py        Cloud red team scan of the deployed agent
   orchestrator.py            Runs all three stages + uploads reports
+  sample_target_agent.py     Fictional agent-with-tools to scan before you have a real one
+  a2a_target_agent.py        Same scenario, exposed as an A2A-callable Prompt agent
+  a2a_client_example.py      Diagnostic: calls a2a_target_agent.py over real A2A
   data/baseline_prompts.jsonl
 .github/workflows/
   ai-safety-scan.yml         terraform apply -> python orchestrator.py,
@@ -207,6 +212,56 @@ Continuous/scheduled evaluation against live production traffic and
 Azure Monitor alerting are a separate, bigger step -- not something this
 repo does, since it's testing on a schedule against a fixed baseline, not
 watching a live agent in production.
+
+## A2A (agent-to-agent) access
+
+`sample_target_agent.py`'s agent only answers our own scripts. `a2a_target_agent.py`
+builds the same fictional customer-support scenario as a Prompt agent (the
+newer "responses protocol" agent type) with incoming
+[Agent2Agent](https://a2a-protocol.org/latest/) enabled — a preview Foundry
+feature — so another agent, anywhere, can discover and call it too.
+
+```bash
+cd agent
+python a2a_target_agent.py
+```
+
+This creates the Prompt agent, enables its A2A endpoint + agent card, and
+runs one local smoke-test message. It's a separate agent/file from
+`sample_target_agent.py` on purpose: incoming A2A requires the responses
+protocol, and rebuilding the classic-API agent that `orchestrator.py` /
+`red_team_agentic.py` already depend on would risk breaking that pipeline.
+
+**Authentication**: incoming A2A requires Microsoft Entra ID — no API keys,
+no unauthenticated access. Terraform now grants scan operators the
+`Foundry Agent Consumer` role (least-privilege — lets you *call* an agent
+without the broader `Foundry User` build/configure permissions). Anyone
+else who should be allowed to call this agent over A2A needs that same
+role assigned to their identity.
+
+**Open question, flagged rather than papered over**: the two tools
+(`lookup_customer_account`, `reset_customer_password`) are plain Python
+functions executed by whichever process drives the `responses.create` loop
+— that's clearly *us* when we call the agent directly, but it's unclear
+from Microsoft's current docs whether a genuinely external A2A caller also
+becomes responsible for executing them (which wouldn't make sense — they
+have no access to the fake account data), or whether Foundry handles that
+server-side for A2A-originated turns. `a2a_client_example.py` is a
+diagnostic built specifically to answer this: it calls the agent the way a
+real external caller would, over the actual A2A protocol via the
+open-source `a2a-sdk`, instead of our own direct SDK calls.
+
+```bash
+pip install a2a-sdk azure-identity httpx   # not in requirements.txt -- one-off diagnostic
+python a2a_client_example.py
+```
+
+If the reply correctly reports ACC-1001's balance, tool execution works
+over A2A. If it stalls or replies without the looked-up data, that
+client-executed function-tool pattern doesn't carry over to A2A callers as
+implemented, and tools would need to be backed by something Foundry can
+invoke itself rather than a local Python function. This whole feature is
+in public preview — verify before depending on it in production.
 
 ## What each stage actually checks
 

@@ -201,6 +201,16 @@ resource "azurerm_role_assignment" "kv_secrets" {
   principal_id         = each.value
 }
 
+resource "azurerm_role_assignment" "foundry_agent_consumer" {
+  # Lets scan operators call agents over A2A (e.g. a2a_target_agent.py)
+  # without the broader build/configure permissions Foundry User grants.
+  # Least-privilege by design, per Microsoft's own A2A auth guidance.
+  for_each             = toset(local.scan_operator_ids)
+  scope                = azurerm_cognitive_account.account.id
+  role_definition_name = "Foundry Agent Consumer"
+  principal_id         = each.value
+}
+
 resource "azurerm_role_assignment" "monitoring_publisher" {
   # Despite the name, this role covers publishing all telemetry types
   # (traces/logs, not just metrics) -- required since local_authentication_

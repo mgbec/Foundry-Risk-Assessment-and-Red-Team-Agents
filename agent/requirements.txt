@@ -1,6 +1,6 @@
 # Requires Python 3.10, 3.11, 3.12, or 3.13 (PyRIT does not support 3.9)
 azure-ai-evaluation[redteam]>=1.0.0
-azure-ai-projects>=1.0.0
+azure-ai-projects>=2.3.0  # 2.3.0+ needed for Prompt agents / incoming A2A (see a2a_target_agent.py)
 azure-ai-agents>=1.0.0
 azure-identity>=1.17.0
 azure-storage-blob>=12.20.0
