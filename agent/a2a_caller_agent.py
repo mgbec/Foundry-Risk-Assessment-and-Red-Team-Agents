@@ -97,7 +97,10 @@ def ensure_a2a_connection(settings, target_agent_name: str) -> None:
 
 def ensure_caller_agent(settings, project: AIProjectClient):
     a2a_connection = project.connections.get(CONNECTION_NAME)
-    tool = A2APreviewTool(project_connection_id=a2a_connection.id)
+    # The default anonymous agent-card fetch 404s against our target --
+    # its incoming-A2A endpoint requires Entra auth on every A2A URL,
+    # card included (see a2a_target_agent.py / the README's A2A section).
+    tool = A2APreviewTool(project_connection_id=a2a_connection.id, send_credentials_for_agent_card=True)
 
     agent = project.agents.create_version(
         agent_name=CALLER_AGENT_NAME,
