@@ -40,6 +40,31 @@ from config import load_settings
 from a2a_target_agent import DEFAULT_AGENT_NAME
 
 
+def _parts_text(parts) -> list[str]:
+    texts = []
+    for part in parts:
+        text = getattr(part, "text", None)
+        if not text and hasattr(part, "root"):
+            text = getattr(part.root, "text", None)
+        if text:
+            texts.append(text)
+    return texts
+
+
+def _extract_text(response) -> str | None:
+    """Checks every place A2A might put the final answer: artifacts,
+    conversation history, or the task status's own completion message."""
+    texts = []
+    for artifact in getattr(response, "artifacts", []):
+        texts.extend(_parts_text(getattr(artifact, "parts", [])))
+    for msg in getattr(response, "history", []):
+        texts.extend(_parts_text(getattr(msg, "parts", [])))
+    status_message = getattr(getattr(response, "status", None), "message", None)
+    if status_message is not None:
+        texts.extend(_parts_text(getattr(status_message, "parts", [])))
+    return "\n".join(texts) if texts else None
+
+
 async def call_agent(project_endpoint: str, agent_name: str, message: str) -> None:
     base_url = f"{project_endpoint}/agents/{agent_name}/endpoint/protocols/a2a"
 
@@ -70,7 +95,16 @@ async def call_agent(project_endpoint: str, agent_name: str, message: str) -> No
         request = SendMessageRequest(message=new_text_message(message, role=Role.ROLE_USER))
         print(f"[A2AClient] Sending: {message!r}")
         async for response in client.send_message(request):
-            print(f"[A2AClient] Reply: {response}")
+            text = _extract_text(response)
+            if text:
+                print(f"[A2AClient] Reply text: {text}")
+            else:
+                print("[A2AClient] No text in artifacts/history/status.message. Full object:")
+                try:
+                    from google.protobuf import text_format
+                    print(text_format.MessageToString(response))
+                except Exception:
+                    print(repr(response))
 
         await client.close()
 
