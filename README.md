@@ -23,7 +23,9 @@ agent/
   sample_target_agent.py     Fictional agent-with-tools to scan before you have a real one
   a2a_target_agent.py        Same scenario, exposed as an A2A-callable Prompt agent
   a2a_client_example.py      Diagnostic: calls a2a_target_agent.py over real A2A
+  a2a_caller_agent.py        Diagnostic: another Foundry agent (or external target) calls it via A2APreviewTool
   data/baseline_prompts.jsonl
+a2a-test-server/             Disposable public echo agent for testing outgoing A2A (see deploy.md)
 .github/workflows/
   ai-safety-scan.yml         terraform apply -> python orchestrator.py,
                               scheduled weekly + manual trigger
@@ -303,6 +305,21 @@ here -- worth filing with Microsoft directly (the error messages
 themselves link their troubleshooting guide, which doesn't cover this
 combination). `client.get_task()` in `a2a-sdk` remains the one unexplored
 avenue if you want to keep digging independently.
+
+**Does outgoing A2A fare better against a real external server?** All the
+failures above involve Foundry-to-Foundry special-casing. `a2a-test-server/`
+is a minimal, standards-compliant, unauthenticated public A2A echo agent
+(deployed to Azure Container Apps -- see `a2a-test-server/deploy.md`) built
+specifically to test outgoing A2A against a genuine external target instead:
+
+```bash
+python agent/a2a_caller_agent.py --target-url "https://<your-test-server-fqdn>" --message "hello"
+```
+
+A reply containing the test server's `TEST-SERVER-CONFIRMED` marker means
+outgoing A2A to a real external, compliant server works end to end, and
+the earlier failures are specific to Foundry recognizing another Foundry
+agent as the target -- not a problem with the A2A tool generally.
 
 ## What each stage actually checks
 
