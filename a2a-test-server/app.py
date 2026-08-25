@@ -87,7 +87,13 @@ def build_app() -> Starlette:
         default_output_modes=["text/plain"],
         capabilities=AgentCapabilities(streaming=False, extended_agent_card=False),
         supported_interfaces=[
-            AgentInterface(protocol_binding="JSONRPC", url=public_url, protocol_version="1.0"),
+            # protocol_version deliberately left unset: agent_card_to_dict()
+            # only backfills the legacy url/protocolVersion/preferredTransport
+            # fields (which Foundry's outgoing A2A tool requires) when at
+            # least one interface has an empty or legacy protocol_version --
+            # setting it to "1.0" here made that compat conversion silently
+            # produce nothing, which is exactly what broke this the first time.
+            AgentInterface(protocol_binding="JSONRPC", url=public_url),
         ],
         skills=[skill],
     )
