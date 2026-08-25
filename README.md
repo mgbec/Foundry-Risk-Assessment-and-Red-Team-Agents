@@ -347,6 +347,66 @@ public and unauthenticated:
 az containerapp delete --name a2a-test-server --resource-group rg-aisafety-redteam --yes
 ```
 
+### Connecting to an agent hosted on AWS or Google Cloud
+
+Everything proven above generalizes: outgoing A2A from Foundry works
+against any standards-compliant external server, regardless of what's
+hosting it -- `a2a_caller_agent.py --target-url` doesn't care whether that
+URL points at Azure Container Apps, AWS, or GCP. As of 2026 both AWS
+Bedrock AgentCore and Google Vertex AI Agent Engine have native A2A
+support, so the pattern is the same `A2APreviewTool` + project connection
+already used here. What changes is the target URL and, critically, *how
+you authenticate* -- Foundry's Azure-native connection options
+(`AgenticIdentityToken`, project managed identity) don't extend across
+cloud boundaries, so cross-cloud connections funnel through Foundry's
+**Custom OAuth** connection type instead, pointed at whatever OAuth
+provider fronts the remote agent.
+
+**AWS Bedrock AgentCore**:
+- Endpoint: AgentCore proxies A2A through its own control-plane API rather
+  than a plain URL on the container's own domain:
+  `https://bedrock-agentcore.<region>.amazonaws.com/runtimes/<url-escaped-agent-arn>/invocations`,
+  with the agent card at `.../invocations/.well-known/agent-card.json`.
+- Auth: AgentCore supports SigV4 (AWS's native request-signing scheme) or
+  OAuth 2.0. SigV4 has no Foundry connection equivalent, so for Foundry to
+  call it, the AWS side needs an OAuth 2.0 authorizer configured (e.g.
+  Amazon Cognito) -- then use Foundry's Custom OAuth connection type
+  against Cognito's token/authorization URLs and the client ID/secret it
+  issued.
+- Verify which A2A protocol version the container actually implements
+  before assuming it'll just work -- this repo hit exactly that mismatch
+  (Foundry's outgoing tool expects v0.3-shaped responses) building its own
+  test server; a foreign container could easily be v1.0-native only.
+
+**Google Vertex AI Agent Engine**:
+- Endpoint: `https://{LOCATION}-aiplatform.googleapis.com/v1beta1/projects/{PROJECT_ID}/locations/{LOCATION}/reasoningEngines/{AGENT_ENGINE_ID}/a2a`
+- Auth: standard Google OAuth 2.0 bearer tokens, gated by IAM -- the
+  calling identity needs an appropriate Vertex AI role (e.g.
+  `roles/aiplatform.user`) on that `reasoningEngines` resource. Create a
+  GCP service account for this, grant it that role, and use Foundry's
+  Custom OAuth connection type against Google's token endpoint
+  (`https://oauth2.googleapis.com/token`) with that service account's
+  credentials.
+
+**General cross-cloud checklist**:
+1. Confirm the remote agent's A2A endpoint is actually reachable from the
+   public internet (or whatever private networking connects the clouds).
+2. Confirm which A2A protocol version/wire format it speaks -- don't
+   assume; this repo's own test server needed `enable_v0_3_compat=True`
+   to work with Foundry's outgoing tool, and a remote AWS/GCP agent could
+   have the same gap in either direction.
+3. Set up an OAuth 2.0 front door on the remote side, since Foundry's
+   Entra-native auth options don't cross cloud boundaries.
+4. Create the Foundry connection with `category: RemoteA2A`,
+   `authType: OAuth2`, pointed at that OAuth provider -- see the "Custom
+   OAuth Identity Passthrough" REST example in [Connect to an A2A agent
+   endpoint from Foundry Agent
+   Service](https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/agent-to-agent?pivots=rest-api#create-an-a2a-connection-by-using-the-rest-api).
+5. Test with a plain, low-stakes message before wiring it into a real
+   agent's tool list -- exactly the pattern `a2a_caller_agent.py` and
+   `a2a-test-server` used to validate outgoing A2A here in the first
+   place.
+
 ## What each stage actually checks
 
 - **Risk assessment** (`risk_assessment.py`): runs a benign baseline prompt
