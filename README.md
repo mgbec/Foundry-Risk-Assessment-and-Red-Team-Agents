@@ -316,10 +316,36 @@ specifically to test outgoing A2A against a genuine external target instead:
 python agent/a2a_caller_agent.py --target-url "https://<your-test-server-fqdn>" --message "hello"
 ```
 
-A reply containing the test server's `TEST-SERVER-CONFIRMED` marker means
-outgoing A2A to a real external, compliant server works end to end, and
-the earlier failures are specific to Foundry recognizing another Foundry
-agent as the target -- not a problem with the A2A tool generally.
+**CONFIRMED (tested 2026-08-25): outgoing A2A works.** Against
+`a2a-test-server`, the full round trip succeeded -- card discovery,
+JSON-RPC dispatch, task execution, content delivery -- and the reply
+correctly contained the test server's `TEST-SERVER-CONFIRMED` marker. Two
+fixes were needed on the test server to get there, both worth knowing if
+you build your own external A2A endpoint for Foundry to call:
+
+1. **Agent card**: Foundry's outgoing A2A tool requires the legacy
+   `url`/`protocolVersion`/`preferredTransport` fields on the card.
+   `a2a-sdk`'s card serialization only backfills those automatically when
+   at least one `AgentInterface` has an empty or legacy `protocol_version`
+   -- setting it to `"1.0"` (the natural choice for a new server) silently
+   disables that backfill.
+2. **Wire protocol**: Foundry's outgoing A2A tool speaks the older v0.3
+   JSON-RPC methods, not the SDK's native v1.0 dispatch. `a2a-sdk`'s
+   `create_jsonrpc_routes` has an `enable_v0_3_compat=True` flag for
+   exactly this.
+
+So the earlier failures really were specific to Foundry recognizing
+*another Foundry agent* as the target (both its documented auto-detection
+and manual-override paths for that case are broken) -- not a problem with
+the A2A tool or outgoing A2A generally. If you need Foundry to call
+another Foundry agent today, route through a plain external A2A server
+(like this one) in between, or wait for that specific gap to be fixed.
+
+Tear the test server down when you're done with it -- it's genuinely
+public and unauthenticated:
+```bash
+az containerapp delete --name a2a-test-server --resource-group rg-aisafety-redteam --yes
+```
 
 ## What each stage actually checks
 
