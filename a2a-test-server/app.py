@@ -106,7 +106,10 @@ def build_app() -> Starlette:
 
     routes = []
     routes.extend(create_agent_card_routes(agent_card))
-    routes.extend(create_jsonrpc_routes(request_handler, "/"))
+    # Foundry's outgoing A2A tool speaks the older v0.3 wire protocol --
+    # this flag makes the same endpoint also accept v0.3-shaped JSON-RPC
+    # calls (message/send, etc.), not just the SDK's native v1.0 dispatch.
+    routes.extend(create_jsonrpc_routes(request_handler, "/", enable_v0_3_compat=True))
     return Starlette(routes=routes)
 
 
