@@ -7,6 +7,14 @@ assessment** pass, followed by an adversarial **AI Red Teaming Agent** scan
 the agent built on top of it. Runs on a weekly schedule via GitHub Actions,
 or on demand.
 
+Also includes a working **Agent2Agent (A2A)** setup: a Prompt agent exposed
+as a callable A2A endpoint, diagnostics that exercise both the incoming and
+outgoing direction against it, a disposable external test server for
+verifying outgoing A2A independent of Foundry-specific quirks, and
+documented fixes for several real bugs hit along the way (see [A2A
+(agent-to-agent) access](#a2a-agent-to-agent-access) below) — including
+guidance for connecting to agents hosted on AWS or Google Cloud.
+
 ## Layout
 
 ```
@@ -448,6 +456,13 @@ orchestrator uploads to the Terraform-provisioned storage account under
   `Foundry User`, etc.) — functionally identical, but don't be surprised
   if you see either name in the portal or provider docs.
 - **Python 3.10–3.13 required** for the `redteam` extra (PyRIT drops 3.9).
+- **Incoming A2A and Foundry-to-Foundry outgoing A2A are currently broken**
+  in this preview (confirmed, not suspected — see [A2A (agent-to-agent)
+  access](#a2a-agent-to-agent-access)): incoming calls complete with no
+  retrievable content, and both of Microsoft's documented paths for one
+  Foundry agent calling another fail. Outgoing A2A to a genuine external
+  server works fine once you know two non-obvious fixes, also documented
+  there.
 
 ## Tuning the scan
 
