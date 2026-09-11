@@ -44,13 +44,39 @@ def get_a2a_tool(project: AIProjectClient) -> A2APreviewTool:
     derive it by concatenation (that derivation is the suspected cause of
     the 404s seen with base_url alone). The connection's `target` stays
     pointed at /entra/rpc for actual tool-call invocation.
+
+    IMPORTANT: use the ROUTE-SPECIFIC card (/entra/.well-known/agent-card.json),
+    NOT the generic /.well-known/agent-card.json. The SCF agent serves a
+    separate card per auth route (see docs/a2a-integration.md); the generic
+    card's top-level `url` is the /cognito/rpc endpoint, so resolving it would
+    make the A2A tool send message/send to the Cognito route -- which rejects
+    our Entra token with a 401. The /entra card's `url` is /entra/rpc, matching
+    the connection target and the token audience configured here.
+
+    PREREQUISITE ON THE AWS SIDE (verified 2026-09-11): the deployed SCF
+    stack currently serves the entra card route as 404 even though POST
+    /entra/rpc exists and is guarded (returns 401 without a token). The
+    a2a_bridge Lambda already builds a per-prefix card
+    (build_card("entra")); what's missing is the API Gateway GET route
+    mapping /entra/.well-known/agent-card.json -> that Lambda. Until that
+    route is added on the AWS side, card resolution here 404s. A2APreviewTool
+    has no way to supply the card inline or to override the RPC target
+    independently of the resolved card (its only fields are
+    project_connection_id / base_url / agent_card_path /
+    send_credentials_for_agent_card), so the entra card MUST resolve for the
+    Entra path to work. Fix on the AWS stack: add the entra GET route
+    alongside the existing /cognito/.well-known/agent-card.json route (the
+    Terraform in SCF-Agent-with-A2A/terraform/a2a.tf adds both when
+    entra_tenant_id is set -- this deployment appears to have had Entra
+    wired in the console, which added /entra/rpc + its authorizer but not
+    the card GET route).
     """
     connection = project.connections.get(A2A_CONNECTION_NAME)
     origin = "https://ar4y22vewc.execute-api.us-east-1.amazonaws.com"
     return A2APreviewTool(
         project_connection_id=connection.id,
         base_url=origin,
-        agent_card_path=f"{origin}/.well-known/agent-card.json",
+        agent_card_path=f"{origin}/entra/.well-known/agent-card.json",
     )
 
 

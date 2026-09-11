@@ -91,34 +91,77 @@ auth paths per its published card:
 We're using `/entra/rpc` so the Foundry project's own managed identity can
 call it without provisioning separate Cognito credentials.
 
-**The one value the card doesn't publish**: because the `entra` scheme is
-generic `openIdConnect` (not a scoped `oauth2` flow like the `cognito`
-scheme), the card has no `audience`/`scopes` field for it — that
-validation lives only in the AWS Lambda authorizer's own config. You need
-to get the expected `aud` from that authorizer's code/environment before
-the connection will authenticate successfully.
+This path is **confirmed working** (verified 2026-09-11). The setup below
+records the exact values and the two non-obvious gotchas that make or break
+it. The whole thing is codified in `infra/` — no manual portal steps needed
+for a fresh deploy.
 
-1. **Get the audience** the `/entra/rpc` Lambda authorizer validates
-   (check its code/env vars for `aud`, `audience`, or JWKS validation
-   logic).
-2. **Confirm a service principal for that audience exists in your
-   Foundry project's tenant** — if the App Registration behind that
-   audience lives in a different tenant, it needs to be multi-tenant and
-   consented into yours, or the Lambda needs to accept your tenant's
-   issuer specifically.
-3. **Create the connection** — either run `agent/setup_a2a_connection.sh`
-   (target already defaults to the confirmed
-   `https://ar4y22vewc.execute-api.us-east-1.amazonaws.com/entra/rpc`;
-   just set `AWS_A2A_AUDIENCE`), or apply `infra/a2a_connection.tf` by
-   setting `aws_a2a_audience` in `terraform.tfvars`. Pick one, not both.
-4. **Test it**: `python agent/a2a_collaborator.py` creates a small
-   collaborator agent with the A2A tool attached and forces a tool call
-   (try a prompt like "Look up SCF control IAC-15" — one of the card's own
-   example skills) so you can confirm the round trip works.
-5. **Wire it into the real pipeline**: once verified, add the same
-   `A2APreviewTool` to the agent `orchestrator.py` deploys, or to a
-   dedicated agent the orchestrator calls, so scan runs can pull
-   compliance-framework context from the SCF agent.
+**The identity chain, end to end:**
+
+1. **The audience app registration** (`api://43351acf-7a44-4dda-9ee9-500e76b4e9ba`,
+   client id `43351acf-…`) is the SCF agent's Entra API app, owned in this
+   tenant (`7cf5e1a0-…`). It has `requestedAccessTokenVersion = 2`, so it
+   issues **v2.0** tokens (issuer `https://login.microsoftonline.com/7cf5e1a0-…/v2.0`,
+   no issuer override needed).
+2. **App-only callers need an App role, not a delegated scope.** The Foundry
+   project's system-assigned managed identity calls with the client_credentials
+   (app-only) flow, so the audience app must expose an **App role** with
+   `allowedMemberTypes = ["Application"]` (`Agent.Invoke` here), and the MI must
+   be **assigned** that role. Both are now managed by
+   `infra/a2a_connection.tf` (`azuread_application_app_role.scf_agent_invoke` +
+   `azuread_app_role_assignment.foundry_mi_scf_invoke`). Without this you get a
+   `consent_required` / no-`roles`-claim dead end.
+3. **The connection** (`infra/a2a_connection.tf`) is `ProjectManagedIdentity`
+   auth with `audience = api://43351acf-…`, so the MI requests a token *for*
+   that resource. `target` is `/entra/rpc`.
+4. **The A2A tool** (`agent/a2a_collaborator.py`) points `agent_card_path` at
+   the **route-specific** card `…/entra/.well-known/agent-card.json`, NOT the
+   generic `/.well-known/agent-card.json`. The generic (and the cognito) card
+   advertise `url = /cognito/rpc`; only the entra card's `url` is `/entra/rpc`.
+   `A2APreviewTool` sends `message/send` to whatever `url` the resolved card
+   advertises, so resolving the wrong card silently routes the Entra token to
+   the Cognito route (401).
+
+**The gotcha that costs you the last 401 — the two audience forms.** The
+connection requests a token *for* `api://43351acf-…`, but Entra stamps a
+**v2.0 app-only token's `aud` as the bare client-id GUID** (`43351acf-…`),
+not the `api://` URI. So the AWS API Gateway JWT authorizer must be
+configured to accept the **GUID** form:
+
+```hcl
+# SCF-Agent-with-A2A/terraform/terraform.tfvars
+entra_tenant_id       = "7cf5e1a0-b8fd-43ef-a146-32f4b47d6e4e"
+entra_audience        = "43351acf-7a44-4dda-9ee9-500e76b4e9ba"   # bare GUID: what the v2.0 aud actually is
+entra_issuer_override = ""                                       # empty -> v2.0 issuer
+```
+
+Read the API Gateway access log group `/aws/apigateway/scf-agent-a2a` to
+diagnose 401s — its `authError` field says exactly which check failed
+(`issuer does not match`, `the token does not have a valid audience`, or
+`missing: token not provided`). Setting `entra_tenant_id` also makes the SCF
+Terraform create the `/entra/rpc` route, its authorizer, **and** the
+`GET /entra/.well-known/agent-card.json` route as a matched set — wiring
+Entra by hand in the console adds the rpc route but not the card route, which
+404s card resolution.
+
+**On this repo's side**, set in `infra/terraform.tfvars`:
+
+```hcl
+aws_a2a_audience        = "api://43351acf-7a44-4dda-9ee9-500e76b4e9ba"  # the token resource
+scf_agent_app_client_id = "43351acf-7a44-4dda-9ee9-500e76b4e9ba"        # for the app-role grant
+manage_scf_app_role     = true                                          # you own the app reg in this tenant
+scf_agent_app_object_id = "3d347493-86db-4a92-a77c-b3a3f6798467"        # the APPLICATION object id
+```
+
+**Test it**: `python agent/a2a_collaborator.py` creates a small collaborator
+agent with the A2A tool attached and forces a tool call (try "Look up SCF
+control IAC-15") so you can confirm the round trip works. A successful run
+shows `POST /entra/rpc -> 200` with `authError: "-"` in the API Gateway log.
+
+**Wire it into the real pipeline**: once verified, add the same
+`A2APreviewTool` to the agent `orchestrator.py` deploys, or to a dedicated
+agent the orchestrator calls, so scan runs can pull compliance-framework
+context from the SCF agent.
 
 Note: `message/send` on this agent is non-blocking — it returns a Task in
 `submitted` state and you poll `tasks/get` until it's terminal. Foundry's

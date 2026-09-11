@@ -5,6 +5,58 @@
 # Fill in aws_a2a_target / aws_a2a_audience in variables and terraform.tfvars
 # (see agent/setup_a2a_connection.sh for how to determine these values from
 # the AWS agent's card and its JWT authorizer config).
+#
+# ---------------------------------------------------------------------------
+# IDENTITY CHAIN (why this file has app-role resources, not just a connection)
+# ---------------------------------------------------------------------------
+# The Foundry MI is an APP-ONLY caller. Entra only mints a usable token for the
+# SCF API if that API grants the MI an App role (Application member type) --
+# a delegated scope can't work app-only (it needs a signed-in user to consent).
+# So a working call needs all four links below; the two azuread resources in
+# this file are links (1) and (2).
+#
+#   THIS TENANT (7cf5e1a0-...)                          AWS (us-east-1)
+#   ---------------------------------------             -----------------------
+#
+#   SCF API app registration (43351acf-...)
+#   ┌───────────────────────────────────────┐
+#   │ APPLICATION object                     │
+#   │  (1) azuread_application_app_role       │   defines the role on the
+#   │      "Agent.Invoke"                     │   *application* object
+#   │      allowed_member_types=[Application] │
+#   ├───────────────────────────────────────┤
+#   │ SERVICE PRINCIPAL object                │
+#   │   ▲ (2) azuread_app_role_assignment     │   grants the role on the
+#   │   │     grants Agent.Invoke             │   *service principal* object
+#   └───┼───────────────────────────────────┘
+#       │ assigned to
+#   ┌───┴───────────────────────┐
+#   │ Foundry account MI        │
+#   │ (system-assigned identity │
+#   │  of azurerm_cognitive_    │
+#   │  account.account)         │
+#   └───┬───────────────────────┘
+#       │ used by
+#   ┌───┴───────────────────────────────────┐        ┌──────────────────────┐
+#   │ (3) azapi_resource                     │  Bearer│ API Gateway          │
+#   │     aws_agent_a2a_connection           │  token │ /entra/rpc           │
+#   │     authType=ProjectManagedIdentity    │───────▶│ JWT authorizer       │
+#   │     audience=api://43351acf-...         │        │ (4) checks aud + iss │
+#   │     target=.../entra/rpc               │        │  -> SCF agent        │
+#   └───────────────────────────────────────┘        └──────────────────────┘
+#
+# NOTE ON THE TWO OBJECT TYPES: an Entra app reg is two objects -- the
+# APPLICATION (the blueprint, where roles are declared: link 1 uses
+# scf_agent_app_object_id) and the SERVICE PRINCIPAL (the tenant-local
+# instance, where assignments live: link 2 uses the SP object id, resolved by
+# the data source below from scf_agent_app_client_id).
+#
+# NOTE ON THE AUDIENCE (link 4): the connection requests a token FOR
+# api://43351acf-..., but Entra stamps a v2.0 app-only token's `aud` as the
+# bare client-id GUID (43351acf-...). So the AWS authorizer's entra_audience
+# must be the GUID form, while aws_a2a_audience here is the api:// form. See
+# the README "Connecting to an external A2A agent" section.
+# ---------------------------------------------------------------------------
 
 variable "aws_a2a_target" {
   description = "The SCF Compliance Assessment Agent's Entra-auth RPC endpoint, from its card's additionalInterfaces."
@@ -13,7 +65,68 @@ variable "aws_a2a_target" {
 }
 
 variable "aws_a2a_audience" {
-  description = "Entra Application ID URI the AWS Lambda validates as `aud` in the JWT"
+  description = "Entra Application ID URI the AWS Lambda validates as `aud` in the JWT (the connection requests a token for this resource)."
+  type        = string
+  default     = ""
+}
+
+variable "scf_agent_app_client_id" {
+  description = <<-EOT
+    Client (application) ID of the AWS SCF agent's Entra app registration --
+    the resource the Foundry managed identity gets a token for. This is the
+    GUID inside aws_a2a_audience (api://<this-guid>). Needed to grant the MI
+    the app role below. Leave empty to skip the app-role grant (e.g. if the
+    app reg lives in a different tenant and is managed elsewhere).
+  EOT
+  type        = string
+  default     = ""
+}
+
+# ---------------------------------------------------------------------------
+# Entra app-role grant: let the Foundry account's managed identity obtain an
+# app-only token for the SCF agent's API. Without this, the MI's token carries
+# no `roles` claim and (depending on the resource app's config) can't be minted
+# for the api://... audience at all -- which is why a first-time setup hits a
+# 401 at the AWS /entra/rpc JWT authorizer. Mirrors the manual steps:
+#   az ad app update --app-roles ...        (defines Agent.Invoke, App members)
+#   POST /servicePrincipals/{mi}/appRoleAssignments   (assigns it to the MI)
+# Gated on scf_agent_app_client_id so the whole block is opt-in.
+# ---------------------------------------------------------------------------
+data "azuread_service_principal" "scf_agent_api" {
+  count     = var.scf_agent_app_client_id != "" ? 1 : 0
+  client_id = var.scf_agent_app_client_id
+}
+
+# The SCF API app registration must expose an Application-type app role for
+# app-only callers. If you own that app reg in this tenant, manage the role
+# here; if it's owned elsewhere, define the role on that side instead and just
+# keep the assignment below.
+resource "azuread_application_app_role" "scf_agent_invoke" {
+  count          = var.scf_agent_app_client_id != "" && var.manage_scf_app_role ? 1 : 0
+  application_id = "/applications/${var.scf_agent_app_object_id}"
+  role_id        = "75d9ce7a-40ce-421b-8716-096562877ae4"
+
+  allowed_member_types = ["Application"]
+  description          = "A2A callers may invoke the SCF Compliance Agent"
+  display_name         = "Agent.Invoke"
+  value                = "Agent.Invoke"
+}
+
+resource "azuread_app_role_assignment" "foundry_mi_scf_invoke" {
+  count               = var.scf_agent_app_client_id != "" ? 1 : 0
+  app_role_id         = "75d9ce7a-40ce-421b-8716-096562877ae4"
+  principal_object_id = azurerm_cognitive_account.account.identity[0].principal_id
+  resource_object_id  = data.azuread_service_principal.scf_agent_api[0].object_id
+}
+
+variable "manage_scf_app_role" {
+  description = "Whether to define the Agent.Invoke app role on the SCF app registration from here (true if you own that app reg in this tenant). Requires scf_agent_app_object_id."
+  type        = bool
+  default     = false
+}
+
+variable "scf_agent_app_object_id" {
+  description = "Object ID of the SCF agent's Entra APPLICATION (not the service principal) -- only needed when manage_scf_app_role = true."
   type        = string
   default     = ""
 }
