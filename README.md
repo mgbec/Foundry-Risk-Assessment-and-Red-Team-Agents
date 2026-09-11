@@ -168,6 +168,11 @@ Note: `message/send` on this agent is non-blocking — it returns a Task in
 A2A tool handles this polling internally; if you ever call the endpoint
 directly (bypassing the tool) you'll need to poll yourself.
 
+**Security posture**: a MAESTRO-framework threat model and gap analysis of
+both A2A paths (outbound to the SCF agent, inbound to our target agent) is in
+[docs/a2a-threat-model.md](docs/a2a-threat-model.md) — covered controls,
+current gaps, and prioritized remediation.
+
 A2A support in Foundry is in public preview — expect API shape changes;
 recheck `azure-ai-projects` release notes if `A2APreviewTool` fails to
 import.
