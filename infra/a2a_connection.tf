@@ -15,10 +15,10 @@
 # So a working call needs all four links below; the two azuread resources in
 # this file are links (1) and (2).
 #
-#   THIS TENANT (7cf5e1a0-...)                          AWS (us-east-1)
+#   THIS TENANT (<tenant-id>)                           AWS (us-east-1)
 #   ---------------------------------------             -----------------------
 #
-#   SCF API app registration (43351acf-...)
+#   SCF API app registration (<scf-app-client-id>)
 #   ┌───────────────────────────────────────┐
 #   │ APPLICATION object                     │
 #   │  (1) azuread_application_app_role       │   defines the role on the
@@ -41,7 +41,7 @@
 #   │ (3) azapi_resource                     │  Bearer│ API Gateway          │
 #   │     aws_agent_a2a_connection           │  token │ /entra/rpc           │
 #   │     authType=ProjectManagedIdentity    │───────▶│ JWT authorizer       │
-#   │     audience=api://43351acf-...         │        │ (4) checks aud + iss │
+#   │     audience=api://<scf-app-client-id> │        │ (4) checks aud + iss │
 #   │     target=.../entra/rpc               │        │  -> SCF agent        │
 #   └───────────────────────────────────────┘        └──────────────────────┘
 #
@@ -52,8 +52,8 @@
 # the data source below from scf_agent_app_client_id).
 #
 # NOTE ON THE AUDIENCE (link 4): the connection requests a token FOR
-# api://43351acf-..., but Entra stamps a v2.0 app-only token's `aud` as the
-# bare client-id GUID (43351acf-...). So the AWS authorizer's entra_audience
+# api://<scf-app-client-id>, but Entra stamps a v2.0 app-only token's `aud` as
+# the bare client-id GUID (<scf-app-client-id>). So the AWS authorizer's entra_audience
 # must be the GUID form, while aws_a2a_audience here is the api:// form. See
 # the README "Connecting to an external A2A agent" section.
 # ---------------------------------------------------------------------------

@@ -98,10 +98,10 @@ for a fresh deploy.
 
 **The identity chain, end to end:**
 
-1. **The audience app registration** (`api://43351acf-7a44-4dda-9ee9-500e76b4e9ba`,
-   client id `43351acf-…`) is the SCF agent's Entra API app, owned in this
-   tenant (`7cf5e1a0-…`). It has `requestedAccessTokenVersion = 2`, so it
-   issues **v2.0** tokens (issuer `https://login.microsoftonline.com/7cf5e1a0-…/v2.0`,
+1. **The audience app registration** (`api://<scf-app-client-id>`,
+   client id `<scf-app-client-id>`) is the SCF agent's Entra API app, owned in
+   this tenant (`<tenant-id>`). It has `requestedAccessTokenVersion = 2`, so it
+   issues **v2.0** tokens (issuer `https://login.microsoftonline.com/<tenant-id>/v2.0`,
    no issuer override needed).
 2. **App-only callers need an App role, not a delegated scope.** The Foundry
    project's system-assigned managed identity calls with the client_credentials
@@ -112,8 +112,8 @@ for a fresh deploy.
    `azuread_app_role_assignment.foundry_mi_scf_invoke`). Without this you get a
    `consent_required` / no-`roles`-claim dead end.
 3. **The connection** (`infra/a2a_connection.tf`) is `ProjectManagedIdentity`
-   auth with `audience = api://43351acf-…`, so the MI requests a token *for*
-   that resource. `target` is `/entra/rpc`.
+   auth with `audience = api://<scf-app-client-id>`, so the MI requests a token
+   *for* that resource. `target` is `/entra/rpc`.
 4. **The A2A tool** (`agent/a2a_collaborator.py`) points `agent_card_path` at
    the **route-specific** card `…/entra/.well-known/agent-card.json`, NOT the
    generic `/.well-known/agent-card.json`. The generic (and the cognito) card
@@ -123,16 +123,16 @@ for a fresh deploy.
    the Cognito route (401).
 
 **The gotcha that costs you the last 401 — the two audience forms.** The
-connection requests a token *for* `api://43351acf-…`, but Entra stamps a
-**v2.0 app-only token's `aud` as the bare client-id GUID** (`43351acf-…`),
-not the `api://` URI. So the AWS API Gateway JWT authorizer must be
-configured to accept the **GUID** form:
+connection requests a token *for* `api://<scf-app-client-id>`, but Entra
+stamps a **v2.0 app-only token's `aud` as the bare client-id GUID**
+(`<scf-app-client-id>`), not the `api://` URI. So the AWS API Gateway JWT
+authorizer must be configured to accept the **GUID** form:
 
 ```hcl
 # SCF-Agent-with-A2A/terraform/terraform.tfvars
-entra_tenant_id       = "7cf5e1a0-b8fd-43ef-a146-32f4b47d6e4e"
-entra_audience        = "43351acf-7a44-4dda-9ee9-500e76b4e9ba"   # bare GUID: what the v2.0 aud actually is
-entra_issuer_override = ""                                       # empty -> v2.0 issuer
+entra_tenant_id       = "<tenant-id>"
+entra_audience        = "<scf-app-client-id>"   # bare GUID: what the v2.0 aud actually is
+entra_issuer_override = ""                      # empty -> v2.0 issuer
 ```
 
 Read the API Gateway access log group `/aws/apigateway/scf-agent-a2a` to
@@ -147,10 +147,10 @@ Entra by hand in the console adds the rpc route but not the card route, which
 **On this repo's side**, set in `infra/terraform.tfvars`:
 
 ```hcl
-aws_a2a_audience        = "api://43351acf-7a44-4dda-9ee9-500e76b4e9ba"  # the token resource
-scf_agent_app_client_id = "43351acf-7a44-4dda-9ee9-500e76b4e9ba"        # for the app-role grant
-manage_scf_app_role     = true                                          # you own the app reg in this tenant
-scf_agent_app_object_id = "3d347493-86db-4a92-a77c-b3a3f6798467"        # the APPLICATION object id
+aws_a2a_audience        = "api://<scf-app-client-id>"  # the token resource
+scf_agent_app_client_id = "<scf-app-client-id>"        # for the app-role grant
+manage_scf_app_role     = true                         # you own the app reg in this tenant
+scf_agent_app_object_id = "<scf-app-object-id>"        # the APPLICATION object id
 ```
 
 **Test it**: `python agent/a2a_collaborator.py` creates a small collaborator
