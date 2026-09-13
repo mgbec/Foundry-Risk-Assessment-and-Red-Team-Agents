@@ -174,10 +174,34 @@ python agent/a2a_collaborator.py --interactive                     # chat loop, 
 A successful run shows `POST /entra/rpc -> 200` with `authError: "-"` in the
 API Gateway access log (`/aws/apigateway/scf-agent-a2a`).
 
-**Wire it into the real pipeline**: once verified, add the same
-`A2APreviewTool` to the agent `orchestrator.py` deploys, or to a dedicated
-agent the orchestrator calls, so scan runs can pull compliance-framework
-context from the SCF agent.
+**Wire it into the real pipeline** *(suggestion — not yet implemented)*: the
+SCF/A2A work so far lives entirely in the standalone `a2a_collaborator.py`
+script. `orchestrator.py` (the scheduled scan pipeline) has **no** A2A wiring
+today — it creates a plain agent-under-test with no tools and runs the three
+scan stages. If you want scan runs to pull compliance-framework context from
+the SCF agent, there are two ways to bridge that gap, and they differ in more
+than convenience:
+
+- **Option A — attach the A2A tool to the agent-under-test** (modify
+  `ensure_target_agent()` to add the tool, the way `get_a2a_tool()` does in
+  `a2a_collaborator.py`). The *thing being scanned* can then reach the SCF
+  agent during the scan. Useful when you specifically want to red-team an
+  agent that itself has an outbound A2A / compliance capability. **Security
+  note:** this gives the agent-under-test a live outbound A2A capability, so
+  it becomes part of the attack surface the scan (and `docs/a2a-threat-model.md`)
+  must account for.
+
+- **Option B — a dedicated agent the orchestrator calls** (keep the
+  agent-under-test clean; have the orchestrator separately invoke a
+  collaborator agent like the existing `aws-agent-collaborator` to fetch SCF
+  context — e.g. to enrich scorecards with compliance mappings or generate
+  compliance-aware attack objectives). Keeps the outbound A2A capability in a
+  separate, orchestrator-controlled agent, out of the scan target's surface.
+
+Which option fits depends on *what you want the compliance context for*
+(scanning an A2A-capable agent → A; enriching results / attack generation →
+B). Neither is built yet — this is a design choice to make before
+implementing.
 
 Note: `message/send` on this agent is non-blocking — it returns a Task in
 `submitted` state and you poll `tasks/get` until it's terminal. Foundry's
