@@ -75,7 +75,7 @@ acceptable substitute versus a genuine gap is called out per threat.
 
 | Threat | Status | Evidence / gap |
 |--------|--------|----------------|
-| **T5.1** Log manipulation / integrity | Partial | Solid plumbing: OTel → App Insights with AAD auth (tamper-resistant ingestion) and AWS API Gateway access logs (our forensic lifeline while debugging — M3.4.9 / M5.1 in action). **Gaps:** no log-integrity monitoring / checksums (M5.1.2); no anomaly detection (M5.1.3, M1.2.2); tracing is opt-in (off unless `APPLICATIONINSIGHTS_CONNECTION_STRING` is set), so by default there's no persistent trail of A2A calls on the Foundry side. |
+| **T5.1** Log manipulation / integrity | Partial (improved) | Solid plumbing: OTel → App Insights with AAD auth (tamper-resistant ingestion) and AWS API Gateway access logs (our forensic lifeline while debugging — M3.4.9 / M5.1 in action). Each outbound A2A call in `a2a_collaborator.py` is now wrapped in a span with a logged `a2a.correlation_id` for cross-cloud joining (remediation #2, partial). **Remaining gaps:** no log-integrity monitoring / checksums (M5.1.2); no anomaly detection (M5.1.3, M1.2.2); the correlation id is logged/attributed on the Azure side but **not propagated on the wire** to AWS (A2APreviewTool exposes no custom-header hook), so the cross-cloud join is still operator-assisted (id + timestamp) rather than a shared id in the API Gateway log; tracing still requires `APPLICATIONINSIGHTS_CONNECTION_STRING` to actually export. |
 
 ## Layer 1 — Foundation Models
 
@@ -111,10 +111,15 @@ Ranked by risk-to-effort for this specific two-agent setup:
    value, lowest effort. Validate / schema-check and content-filter what
    leaves the collaborator and — more importantly — what returns from the
    SCF agent before it re-enters the agent's context. Closes the C3.1 path.
-2. **Make observability non-optional for A2A calls (T5.1, T6.3).** Tracing
-   is off unless a connection string is set. Wire `trace_run` into
-   `a2a_collaborator.py` and consider defaulting it on for A2A paths so
-   every delegation is auditable.
+2. **Make observability non-optional for A2A calls (T5.1, T6.3).**
+   *Partially done:* `a2a_collaborator.py` now wraps every A2A call in an
+   OpenTelemetry span with a per-call `a2a.correlation_id` (logged to stdout
+   and set as a span attribute), recording exceptions on failure. *Still
+   open:* the span only exports when `APPLICATIONINSIGHTS_CONNECTION_STRING`
+   is set, and the correlation id isn't propagated on the wire to AWS
+   (A2APreviewTool has no custom-header hook), so cross-cloud joins remain
+   operator-assisted. Wire-level propagation depends on a Foundry tool
+   capability that doesn't exist today.
 3. **Agent Card verification for the outbound target (T3.4 / T3.1).** We pin
    the URL; add a check that the resolved card's fields (name, url,
    provider) match expected values — cheap defense-in-depth against a

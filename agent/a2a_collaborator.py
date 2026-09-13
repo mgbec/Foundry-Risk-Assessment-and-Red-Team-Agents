@@ -35,11 +35,15 @@ try:
 except (AttributeError, ValueError):
     pass
 
+import uuid
+
 from azure.identity import DefaultAzureCredential
 from azure.ai.projects import AIProjectClient
 from azure.ai.projects.models import PromptAgentDefinition, A2APreviewTool
+from opentelemetry import trace
 
 from config import load_settings
+from observability import enable_tracing
 
 A2A_CONNECTION_NAME = os.environ.get("A2A_CONNECTION_NAME", "aws-redteam-agent-a2a")
 A2A_AGENT_NAME = os.environ.get("A2A_COLLABORATOR_AGENT_NAME", "aws-agent-collaborator")
@@ -122,6 +126,18 @@ def ask(prompt: str, agent_name: str | None = None, *, openai=None) -> str:
     calls -- e.g. the interactive loop below -- instead of recreating the
     agent every turn. tool_choice="required" forces the A2A delegation so a
     smoke test can't be silently answered by the coordinator model itself.
+
+    OBSERVABILITY: every A2A call is wrapped in an OpenTelemetry span. When
+    APPLICATIONINSIGHTS_CONNECTION_STRING is set the span is exported to
+    Application Insights; otherwise it's a harmless no-op (same pattern as
+    observability.trace_run). Each call gets an "a2a.correlation_id" -- logged
+    to stdout AND set as a span attribute -- so an Azure-side trace can be
+    joined to the AWS side: grep that id in the collaborator's stdout, then
+    line it up (by timestamp) with the API Gateway access log group
+    /aws/apigateway/scf-agent-a2a. A2APreviewTool doesn't expose a way to
+    inject a custom header into the outgoing A2A request, so this is a
+    logged/attributed correlation id rather than one propagated in the wire
+    call -- see docs/a2a-threat-model.md (T5.1) for the remaining gap.
     """
     if openai is None:
         settings = load_settings()
@@ -130,12 +146,28 @@ def ask(prompt: str, agent_name: str | None = None, *, openai=None) -> str:
     if agent_name is None:
         agent_name = create_or_update_collaborator_agent()
 
-    response = openai.responses.create(
-        tool_choice="required",
-        input=prompt,
-        extra_body={"agent_reference": {"name": agent_name, "type": "agent_reference"}},
-    )
-    return response.output_text
+    correlation_id = uuid.uuid4().hex
+    enable_tracing()
+    tracer = trace.get_tracer(__name__)
+
+    with tracer.start_as_current_span("a2a.collaborator.ask") as span:
+        span.set_attribute("a2a.correlation_id", correlation_id)
+        span.set_attribute("a2a.agent_name", agent_name)
+        span.set_attribute("a2a.prompt_length", len(prompt))
+        span.set_attribute("a2a.target_connection", A2A_CONNECTION_NAME)
+        print(f"[A2A] correlation_id={correlation_id} agent={agent_name}")
+        try:
+            response = openai.responses.create(
+                tool_choice="required",
+                input=prompt,
+                extra_body={"agent_reference": {"name": agent_name, "type": "agent_reference"}},
+            )
+        except Exception as exc:  # noqa: BLE001 -- record on the span, then re-raise
+            span.record_exception(exc)
+            span.set_status(trace.Status(trace.StatusCode.ERROR, str(exc)))
+            raise
+        span.set_attribute("a2a.response_length", len(response.output_text or ""))
+        return response.output_text
 
 
 def test_call(prompt: str = "What can the AWS agent do?") -> str:
