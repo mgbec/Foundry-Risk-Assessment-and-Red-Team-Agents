@@ -23,7 +23,17 @@ definition.
 """
 from __future__ import annotations
 
+import argparse
 import os
+import sys
+
+# The SCF agent's replies can contain emoji/unicode; Windows' default cp1252
+# stdout raises UnicodeEncodeError trying to print them. Force UTF-8 so the
+# answer prints cleanly regardless of platform/console codepage.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except (AttributeError, ValueError):
+    pass
 
 from azure.identity import DefaultAzureCredential
 from azure.ai.projects import AIProjectClient
@@ -104,24 +114,82 @@ def create_or_update_collaborator_agent(instructions: str | None = None) -> str:
     return agent.name
 
 
-def test_call(prompt: str = "What can the AWS agent do?") -> str:
-    """Quick smoke test: forces the tool call so you can confirm the A2A
-    connection actually works end-to-end."""
-    settings = load_settings()
-    credential = DefaultAzureCredential()
-    project = AIProjectClient(endpoint=settings.project_endpoint, credential=credential)
-    openai = project.get_openai_client()
+def ask(prompt: str, agent_name: str | None = None, *, openai=None) -> str:
+    """Send one question through the collaborator agent, which delegates to
+    the AWS SCF agent over A2A and returns its answer.
 
-    agent_name = create_or_update_collaborator_agent()
+    Pass an existing agent_name (and openai client) to reuse them across
+    calls -- e.g. the interactive loop below -- instead of recreating the
+    agent every turn. tool_choice="required" forces the A2A delegation so a
+    smoke test can't be silently answered by the coordinator model itself.
+    """
+    if openai is None:
+        settings = load_settings()
+        project = AIProjectClient(endpoint=settings.project_endpoint, credential=DefaultAzureCredential())
+        openai = project.get_openai_client()
+    if agent_name is None:
+        agent_name = create_or_update_collaborator_agent()
 
     response = openai.responses.create(
         tool_choice="required",
         input=prompt,
         extra_body={"agent_reference": {"name": agent_name, "type": "agent_reference"}},
     )
-    print(response.output_text)
     return response.output_text
 
 
+def test_call(prompt: str = "What can the AWS agent do?") -> str:
+    """Quick smoke test: forces the tool call so you can confirm the A2A
+    connection actually works end-to-end."""
+    answer = ask(prompt)
+    print(answer)
+    return answer
+
+
+def interactive() -> None:
+    """Chat loop: create the collaborator agent once, then relay each typed
+    question to the AWS SCF agent over A2A. Type 'quit' or 'exit' to stop."""
+    settings = load_settings()
+    project = AIProjectClient(endpoint=settings.project_endpoint, credential=DefaultAzureCredential())
+    openai = project.get_openai_client()
+    agent_name = create_or_update_collaborator_agent()
+
+    print("Ask the AWS SCF Compliance agent a question (type 'quit' to exit).")
+    print('e.g. "Look up SCF control IAC-15 and show the Level 2 and 3 maturity criteria"\n')
+    while True:
+        try:
+            prompt = input("you> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        if not prompt:
+            continue
+        if prompt.lower() in ("quit", "exit"):
+            break
+        try:
+            print(f"scf> {ask(prompt, agent_name, openai=openai)}\n")
+        except Exception as exc:  # noqa: BLE001 -- keep the loop alive on a transient error
+            print(f"[error] {exc}\n")
+
+
 if __name__ == "__main__":
-    test_call()
+    parser = argparse.ArgumentParser(
+        description="Query the AWS SCF Compliance agent through a Foundry collaborator agent over A2A."
+    )
+    parser.add_argument(
+        "-m", "--message",
+        help="A single question to send. Omit to run the built-in smoke test, "
+             "or use --interactive for a chat loop.",
+    )
+    parser.add_argument(
+        "-i", "--interactive", action="store_true",
+        help="Start an interactive chat loop (reuses one collaborator agent across turns).",
+    )
+    args = parser.parse_args()
+
+    if args.interactive:
+        interactive()
+    elif args.message:
+        print(ask(args.message))
+    else:
+        test_call()
