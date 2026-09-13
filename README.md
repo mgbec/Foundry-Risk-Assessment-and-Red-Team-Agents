@@ -153,10 +153,26 @@ manage_scf_app_role     = true                         # you own the app reg in 
 scf_agent_app_object_id = "<scf-app-object-id>"        # the APPLICATION object id
 ```
 
-**Test it**: `python agent/a2a_collaborator.py` creates a small collaborator
-agent with the A2A tool attached and forces a tool call (try "Look up SCF
-control IAC-15") so you can confirm the round trip works. A successful run
-shows `POST /entra/rpc -> 200` with `authError: "-"` in the API Gateway log.
+The app-role grant (`azuread_application_app_role` +
+`azuread_app_role_assignment` in `infra/a2a_connection.tf`) uses the
+`azuread` provider, so re-run `terraform init` after first setting these —
+it pulls a provider that isn't needed for the base infra. See the identity
+chain diagram at the top of `infra/a2a_connection.tf` for how the app role,
+the MI assignment, the connection, and the AWS authorizer fit together.
+
+**Test it**: `agent/a2a_collaborator.py` creates a small collaborator agent
+with the A2A tool attached, then delegates your question to the SCF agent
+over A2A (`tool_choice="required"` forces the delegation so the round trip is
+actually exercised). Three ways to run it:
+
+```bash
+python agent/a2a_collaborator.py                                   # built-in smoke test
+python agent/a2a_collaborator.py -m "Look up SCF control IAC-15"    # one-off question
+python agent/a2a_collaborator.py --interactive                     # chat loop, reuses one agent
+```
+
+A successful run shows `POST /entra/rpc -> 200` with `authError: "-"` in the
+API Gateway access log (`/aws/apigateway/scf-agent-a2a`).
 
 **Wire it into the real pipeline**: once verified, add the same
 `A2APreviewTool` to the agent `orchestrator.py` deploys, or to a dedicated
